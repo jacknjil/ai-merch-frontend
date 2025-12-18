@@ -8,8 +8,11 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  // This variable helps us see *where* things blow up
+  let debugStep = "start";
+
   try {
-    // -------- 1) Read & sanitize body --------
+    debugStep = "parse-body";
     const body = (await req.json().catch(() => ({}))) as Record<string, any>;
 
     const rawTitle = (body.title ?? "").toString().trim();
@@ -19,57 +22,54 @@ export async function POST(req: NextRequest) {
 
     let count = Number(body.count ?? 1);
     if (!Number.isFinite(count) || count < 1) count = 1;
-    if (count > 8) count = 8; // safety cap
+    if (count > 8) count = 8;
 
     const title = rawTitle || "AI generated design";
     const niche = rawNiche || "general";
     const style = rawStyle || "t-shirt vector illustration";
 
-    // If n8n sends an empty prompt, we synthesize one instead of 400’ing
     const prompt =
       rawPrompt ||
       `${title}, ${style}, ${niche} niche, high quality t-shirt illustration, clean vector art, centered, transparent background`;
 
-    console.log("[n8n/create-asset] Incoming body:", {
+    console.log("[n8n/create-asset] Parsed body:", {
       title,
       niche,
       style,
       count,
-      prompt,
+      promptSnippet: prompt.slice(0, 80),
     });
 
-    // -------- 2) Call OpenAI image API --------
-    // Use `any` here to stay out of TS's way; we still guard at runtime.
+    // ----- OpenAI call -----
+    debugStep = "openai-call";
     const response: any = await openai.images.generate({
       model: "gpt-image-1",
       prompt,
       n: count,
       size: "1024x1024",
-      // Using b64_json on the server is fine (the 400 you saw before
-      // was from the *HTTP* call, not this library call).
       response_format: "b64_json",
     });
 
+    debugStep = "process-openai-response";
     const images = (response?.data ?? []) as Array<{ b64_json?: string }>;
 
     if (!Array.isArray(images) || images.length === 0) {
-      console.error("[n8n/create-asset] No images returned from OpenAI", {
-        response,
-      });
+      console.error("[n8n/create-asset] No images from OpenAI", { response });
       return NextResponse.json(
         { ok: false, error: "No images generated" },
         { status: 500 },
       );
     }
 
-    // -------- 3) Upload each image to Storage + Firestore --------
+    // ----- Upload to Storage + Firestore -----
+    debugStep = "upload-loop";
     const assetsCol = collection(db, "assets");
     const uploaded: { assetId: string; imageUrl: string }[] = [];
 
     for (let i = 0; i < images.length; i++) {
       const b64 = images[i]?.b64_json;
       if (!b64 || typeof b64 !== "string") {
-        console.warn(`[n8n/create-asset] Skipping index ${i} (no b64_json)`);
+        console.warn(`[n8n/create-asset] Skipping image index ${i} (no b64_json)`);
         continue;
       }
 
@@ -79,9 +79,7 @@ export async function POST(req: NextRequest) {
         .slice(2, 10)}.png`;
 
       const fileRef = ref(storage, filename);
-      await uploadBytes(fileRef, buffer, {
-        contentType: "image/png",
-      });
+      await uploadBytes(fileRef, buffer, { contentType: "image/png" });
 
       const url = await getDownloadURL(fileRef);
 
@@ -101,28 +99,33 @@ export async function POST(req: NextRequest) {
     }
 
     if (uploaded.length === 0) {
-      console.error(
-        "[n8n/create-asset] All images skipped, nothing uploaded.",
-      );
+      console.error("[n8n/create-asset] No images uploaded");
       return NextResponse.json(
         { ok: false, error: "No images were uploaded" },
         { status: 500 },
       );
     }
 
-    // -------- 4) Return n8n-friendly payload --------
+    debugStep = "return-success";
     return NextResponse.json(
-      {
-        ok: true,
-        count: uploaded.length,
-        assets: uploaded,
-      },
+      { ok: true, count: uploaded.length, assets: uploaded },
       { status: 200 },
     );
   } catch (err: any) {
-    console.error("[n8n/create-asset] Internal error:", err);
+    console.error(
+      "[n8n/create-asset] Internal error at step:",
+      debugStep,
+      err,
+    );
+
+    // TEMP: return the internal message so we see what's wrong
     return NextResponse.json(
-      { ok: false, error: "Internal server error" },
+      {
+        ok: false,
+        error: `Internal error at step ${debugStep}: ${
+          err?.message || String(err)
+        }`,
+      },
       { status: 500 },
     );
   }
