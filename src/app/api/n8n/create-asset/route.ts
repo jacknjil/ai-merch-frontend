@@ -15,27 +15,19 @@ export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   const requestId = randomUUID();
 
-  // jobRef is used in catch() too
+  // Hoist so catch() can include them even if parsing fails
   let runId: string = requestId;
   let rowId: string | number | null = null;
+
+  // Firestore job doc ref (DocumentReference) stored here once created
   let jobRef: any = null;
 
   try {
     const body = await req.json();
 
-    // n8n should send these, but they are optional
-    const runId = body.runId ?? requestId;
-    const rowId = body.rowId ?? body.id ?? null;
-
-    jobRef = await addDoc(collection(db, "jobs"), {
-    requestId,
-    runId,
-    rowId: rowId?.toString?.() ?? rowId,
-    status: "pending",
-    // ...
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+    // Assign to the OUTER variables (do NOT redeclare with const)
+    runId = body.runId ?? requestId;
+    rowId = body.rowId ?? body.id ?? null;
 
     const promptRaw = (body.prompt ?? "").toString().trim();
     const niche = (body.niche ?? "general").toString();
@@ -57,7 +49,7 @@ export async function POST(req: NextRequest) {
 
     const fullPrompt = style ? `${promptRaw}\n\nStyle: ${style}` : promptRaw;
 
-    // Create a job doc (observability + audit trail)
+    // Create job doc once
     jobRef = await addDoc(collection(db, "jobs"), {
       requestId,
       runId,
@@ -89,7 +81,13 @@ export async function POST(req: NextRequest) {
       n: count,
       size: "1024x1024",
     });
-    log("create_asset.generated", { requestId, runId, rowId, jobId: jobRef.id, ms: Date.now() - tGen });
+    log("create_asset.generated", {
+      requestId,
+      runId,
+      rowId,
+      jobId: jobRef.id,
+      ms: Date.now() - tGen,
+    });
 
     // 2) Upload + Firestore assets
     const images = response.data ?? [];
@@ -104,7 +102,13 @@ export async function POST(req: NextRequest) {
       } else if (image.url) {
         const res = await fetch(image.url);
         if (!res.ok) {
-          log("create_asset.fetch_failed", { requestId, runId, rowId, jobId: jobRef.id, url: image.url });
+          log("create_asset.fetch_failed", {
+            requestId,
+            runId,
+            rowId,
+            jobId: jobRef.id,
+            url: image.url,
+          });
           continue;
         }
         const arr = await res.arrayBuffer();
@@ -136,7 +140,15 @@ export async function POST(req: NextRequest) {
 
       uploaded.push({ assetId: docRef.id, imageUrl: url });
     }
-    log("create_asset.uploaded", { requestId, runId, rowId, jobId: jobRef.id, uploaded: uploaded.length, ms: Date.now() - tUp });
+
+    log("create_asset.uploaded", {
+      requestId,
+      runId,
+      rowId,
+      jobId: jobRef.id,
+      uploaded: uploaded.length,
+      ms: Date.now() - tUp,
+    });
 
     if (uploaded.length === 0) {
       await updateDoc(jobRef, {
@@ -147,7 +159,13 @@ export async function POST(req: NextRequest) {
         updatedAt: serverTimestamp(),
       });
 
-      log("create_asset.error", { requestId, runId, rowId, jobId: jobRef.id, message: "No images generated" });
+      log("create_asset.error", {
+        requestId,
+        runId,
+        rowId,
+        jobId: jobRef.id,
+        message: "No images generated",
+      });
 
       return NextResponse.json(
         { ok: false, requestId, runId, rowId, jobId: jobRef.id, error: "No images generated" },
@@ -198,10 +216,23 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
-    log("create_asset.crash", { requestId, runId, rowId, jobId: jobRef?.id ?? null, message });
+    log("create_asset.crash", {
+      requestId,
+      runId,
+      rowId,
+      jobId: jobRef?.id ?? null,
+      message,
+    });
 
     return NextResponse.json(
-      { ok: false, requestId, runId, rowId, jobId: jobRef?.id ?? null, error: "Internal server error" },
+      {
+        ok: false,
+        requestId,
+        runId,
+        rowId,
+        jobId: jobRef?.id ?? null,
+        error: "Internal server error",
+      },
       { status: 500 }
     );
   }
