@@ -4,23 +4,42 @@ import { db, storage } from '@/lib/firebase';
 import {
   collection,
   addDoc,
-  serverTimestamp,
   updateDoc,
+  serverTimestamp,
+  query,
+  where,
+  getCountFromServer,
+  Timestamp,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { randomUUID } from 'crypto';
-import {
-  getCountFromServer,
-  query,
-  where,
-  Timestamp,
-} from 'firebase/firestore';
 
 export const runtime = 'nodejs';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function log(event: string, data: Record<string, any> = {}) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...data }));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function asBool(v: any): boolean {
+  if (v === true || v === 1) return true;
+  if (v === false || v === 0 || v == null) return false;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y', 'on'].includes(s);
+  }
+  return false;
+}
+
+function getOrigin(req: NextRequest): string {
+  // Works behind reverse proxies too
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
+  const host =
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    req.nextUrl.host;
+  return `${proto}://${host}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -31,14 +50,14 @@ export async function POST(req: NextRequest) {
   let runId: string = requestId;
   let rowId: string | number | null = null;
 
-  // Firestore job doc ref (DocumentReference) stored here once created
+  // Firestore job doc ref stored here once created
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let jobRef: any = null;
 
   try {
     const body = await req.json();
 
-    // Assign to the OUTER variables (do NOT redeclare with const)
+    // Assign to OUTER variables (do NOT redeclare with const)
     runId = body.runId ?? requestId;
     rowId = body.rowId ?? body.id ?? null;
 
@@ -46,11 +65,9 @@ export async function POST(req: NextRequest) {
     const niche = (body.niche ?? 'general').toString();
     const title = (body.title ?? 'AI generated design').toString();
     const style = body.style ? body.style.toString() : '';
-    const isMock =
-      body.mock === true ||
-      body.mock === 'true' ||
-      process.env.MOCK_MODE === '1' ||
-      process.env.MOCK_MODE === 'true';
+
+    // Safe mock parsing: supports boolean/string/env
+    const isMock = asBool(body.mock) || asBool(process.env.MOCK_MODE);
 
     console.log(
       'create-asset: isMock =',
@@ -78,83 +95,7 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(count) || count < 1) count = 1;
     if (count > 8) count = 8;
 
-    if (isMock) {
-      // Serve a cheap placeholder (no OpenAI call, no Firebase Storage upload)
-      const placeholderUrl =
-        process.env.MOCK_IMAGE_URL || 'https://YOUR_DOMAIN/mock.png';
-
-      const assets = Array.from({ length: count }).map((_, i) => ({
-        assetId: `mock-${requestId}-${i}`,
-        imageUrl: placeholderUrl,
-      }));
-
-      return NextResponse.json(
-        {
-          ok: true,
-          requestId,
-          runId,
-          rowId,
-          jobId: jobRef?.id ?? null, // will be null if jobRef not created yet
-          mock: true,
-          count: assets.length,
-          assets,
-        },
-        { status: 200 }
-      );
-    } // ✅ close mock block BEFORE daily cap
-
-    // ---- Daily cap ----
-    const DAILY_CAP = Number(process.env.DAILY_CAP ?? 30); // start small
-    const now = new Date();
-
-    // Use UTC day boundary (simple + consistent)
-    const dayStart = new Date(
-      Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate(),
-        0,
-        0,
-        0
-      )
-    );
-    const dayStartTs = Timestamp.fromDate(dayStart);
-
-    // Count assets created today
-    const q = query(
-      collection(db, 'assets'),
-      where('createdAt', '>=', dayStartTs)
-    );
-
-    const snap = await getCountFromServer(q);
-    const usedToday = snap.data().count;
-
-    // If this request would exceed the cap, block it
-    if (usedToday >= DAILY_CAP) {
-      log('create_asset.rate_limited', {
-        requestId,
-        runId,
-        rowId,
-        usedToday,
-        DAILY_CAP,
-      });
-      return NextResponse.json(
-        {
-          ok: false,
-          requestId,
-          runId,
-          rowId,
-          error: 'Daily limit reached',
-          usedToday,
-          DAILY_CAP,
-        },
-        { status: 429 }
-      );
-    }
-
-    const fullPrompt = style ? `${promptRaw}\n\nStyle: ${style}` : promptRaw;
-
-    // Create job doc once
+    // ✅ Create the job doc FIRST so jobId exists for BOTH mock + real.
     jobRef = await addDoc(collection(db, 'jobs'), {
       requestId,
       runId,
@@ -178,27 +119,135 @@ export async function POST(req: NextRequest) {
       isMock,
     });
 
-    // 1) Generate
-    const tGen = Date.now();
+    // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
+    if (isMock) {
+      const origin = getOrigin(req);
+
+      // Best practice: serve from /mock.png (public folder root), not /public/mock.png
+      const placeholderUrl = process.env.MOCK_IMAGE_URL || `${origin}/mock.png`;
+
+      const assets = Array.from({ length: count }).map((_, i) => ({
+        assetId: `mock-${jobRef.id}-${i + 1}`,
+        imageUrl: placeholderUrl,
+      }));
+
+      await updateDoc(jobRef, {
+        status: 'mock_done',
+        assets,
+        generatedCount: assets.length,
+        finishedAt: serverTimestamp(),
+        ms: Date.now() - startedAt,
+        updatedAt: serverTimestamp(),
+      });
+
+      log('create_asset.mock_done', {
+        requestId,
+        runId,
+        rowId,
+        jobId: jobRef.id,
+        count: assets.length,
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          requestId,
+          runId,
+          rowId,
+          jobId: jobRef.id,
+          mock: true,
+          count: assets.length,
+          assets,
+        },
+        { status: 200 }
+      );
+    }
+
+    // ---- Daily cap (real generations only) ----
+    const DAILY_CAP = Number(process.env.DAILY_CAP ?? 10); // economy default
+    const now = new Date();
+
+    // Simple + consistent boundary (UTC midnight). If you want NY midnight, we can adjust later.
+    const dayStart = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0
+      )
+    );
+
+    const dayStartTs = Timestamp.fromDate(dayStart);
+    const q = query(
+      collection(db, 'assets'),
+      where('createdAt', '>=', dayStartTs)
+    );
+
+    const snapshot = await getCountFromServer(q);
+    const usedToday = snapshot.data().count;
+
+    // If generating `count` would exceed cap, block
+    if (usedToday + count > DAILY_CAP) {
+      log('create_asset.rate_limited', {
+        requestId,
+        runId,
+        rowId,
+        jobId: jobRef.id,
+        usedToday,
+        DAILY_CAP,
+      });
+
+      await updateDoc(jobRef, {
+        status: 'error',
+        error: 'Daily limit reached',
+        usedToday,
+        DAILY_CAP,
+        ms: Date.now() - startedAt,
+        updatedAt: serverTimestamp(),
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          requestId,
+          runId,
+          rowId,
+          jobId: jobRef.id,
+          error: 'Daily limit reached',
+          usedToday,
+          DAILY_CAP,
+        },
+        { status: 429 }
+      );
+    }
+
+    // Compose prompt
+    const fullPrompt = style ? `${promptRaw}\n\nStyle: ${style}` : promptRaw;
+
+    // ---- Generate images with OpenAI ----
+    const genStart = Date.now();
     const response = await openai.images.generate({
       model: 'gpt-image-1',
       prompt: fullPrompt,
       n: count,
       size: '1024x1024',
     });
+
     log('create_asset.generated', {
       requestId,
       runId,
       rowId,
       jobId: jobRef.id,
-      ms: Date.now() - tGen,
+      ms: Date.now() - genStart,
     });
 
-    // 2) Upload + Firestore assets
     const images = response.data ?? [];
     const uploaded: { assetId: string; imageUrl: string }[] = [];
 
-    const tUp = Date.now();
+    const uploadStart = Date.now();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const image of images as any[]) {
       let buffer: Buffer | null = null;
@@ -255,7 +304,7 @@ export async function POST(req: NextRequest) {
       rowId,
       jobId: jobRef.id,
       uploaded: uploaded.length,
-      ms: Date.now() - tUp,
+      ms: Date.now() - uploadStart,
     });
 
     if (uploaded.length === 0) {
@@ -320,7 +369,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     const message = String(err?.message ?? 'Internal server error');
 
-    // Try to mark job as error if it exists
+    // If we created a job doc, mark it error
     try {
       if (jobRef) {
         await updateDoc(jobRef, {
