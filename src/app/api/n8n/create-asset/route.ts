@@ -46,14 +46,20 @@ export async function POST(req: NextRequest) {
     const niche = (body.niche ?? 'general').toString();
     const title = (body.title ?? 'AI generated design').toString();
     const style = body.style ? body.style.toString() : '';
-    const Mock =
-     body.mock === true ||
-     body.mock === "true" ||
-     process.env.MOCK_MODE === "1" ||
-     process.env.MOCK_MODE === "true";
+    const isMock =
+      body.mock === true ||
+      body.mock === 'true' ||
+      process.env.MOCK_MODE === '1' ||
+      process.env.MOCK_MODE === 'true';
 
-     console.log("create-asset: isMock =", Mock, "body.mock =", body.mock, "MOCK_MODE =", process.env.MOCK_MODE);
-
+    console.log(
+      'create-asset: isMock =',
+      isMock,
+      'body.mock =',
+      body.mock,
+      'MOCK_MODE =',
+      process.env.MOCK_MODE
+    );
 
     if (!promptRaw) {
       log('create_asset.bad_request', {
@@ -72,16 +78,30 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(count) || count < 1) count = 1;
     if (count > 8) count = 8;
 
-    if (Mock) {
-     // Serve a cheap placeholder (no OpenAI call, no Firebase Storage upload)
-     const placeholderUrl =
-     process.env.MOCK_IMAGE_URL || "https://YOUR_DOMAIN/mock.png";
+    if (isMock) {
+      // Serve a cheap placeholder (no OpenAI call, no Firebase Storage upload)
+      const placeholderUrl =
+        process.env.MOCK_IMAGE_URL || 'https://YOUR_DOMAIN/mock.png';
 
-    const assets = Array.from({ length: count }).map((_, i) => ({
-     assetId: `mock-${requestId}-${i}`,
-     imageUrl: placeholderUrl,
-  }));
+      const assets = Array.from({ length: count }).map((_, i) => ({
+        assetId: `mock-${requestId}-${i}`,
+        imageUrl: placeholderUrl,
+      }));
 
+      return NextResponse.json(
+        {
+          ok: true,
+          requestId,
+          runId,
+          rowId,
+          jobId: jobRef?.id ?? null, // will be null if jobRef not created yet
+          mock: true,
+          count: assets.length,
+          assets,
+        },
+        { status: 200 }
+      );
+    } // ✅ close mock block BEFORE daily cap
 
     // ---- Daily cap ----
     const DAILY_CAP = Number(process.env.DAILY_CAP ?? 30); // start small
@@ -144,7 +164,7 @@ export async function POST(req: NextRequest) {
       niche,
       style,
       requestedCount: count,
-      Mock,
+      isMock,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -155,7 +175,7 @@ export async function POST(req: NextRequest) {
       rowId,
       jobId: jobRef.id,
       count,
-      Mock,
+      isMock,
     });
 
     // 1) Generate
@@ -332,4 +352,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-  }
+}
