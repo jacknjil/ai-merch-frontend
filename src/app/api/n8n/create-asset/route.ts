@@ -43,10 +43,16 @@ function getOrigin(req: NextRequest): string {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get("x-n8n-secret");
-  if (!process.env.N8N_SHARED_SECRET || secret !== process.env.N8N_SHARED_SECRET) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-}
+  const secret = req.headers.get('x-n8n-secret');
+  if (
+    !process.env.N8N_SHARED_SECRET ||
+    secret !== process.env.N8N_SHARED_SECRET
+  ) {
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
 
   const startedAt = Date.now();
   const requestId = randomUUID();
@@ -125,21 +131,53 @@ export async function POST(req: NextRequest) {
     });
 
     // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
+    // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
+    // BUT: we DO create Firestore `assets` docs so the Gallery can read from `assets`
     if (isMock) {
       const origin = getOrigin(req);
 
       // Best practice: serve from /mock.png (public folder root), not /public/mock.png
       const placeholderUrl = process.env.MOCK_IMAGE_URL || `${origin}/mock.png`;
 
-      const assets = Array.from({ length: count }).map((_, i) => ({
-        assetId: `mock-${jobRef.id}-${i + 1}`,
-        imageUrl: placeholderUrl,
-      }));
+      // 1) Create assets docs (published=false) so Gallery has real data
+      const createdAssets: { assetId: string; imageUrl: string }[] = [];
 
+      for (let i = 0; i < count; i++) {
+        const docRef = await addDoc(collection(db, 'assets'), {
+          title,
+          // Store the concept prompt (not the full expanded style string if you prefer)
+          prompt: promptRaw,
+          niche,
+          style,
+          imageUrl: placeholderUrl,
+
+          // No Storage path in mock mode
+          storagePath: '',
+          source: 'mock',
+
+          // link back for debugging/traceability
+          runId,
+          rowId: rowId?.toString?.() ?? rowId,
+          jobId: jobRef?.id ?? null,
+
+          // economy MVP gating
+          published: false,
+
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        createdAssets.push({
+          assetId: docRef.id, // ✅ real Firestore doc id
+          imageUrl: placeholderUrl,
+        });
+      }
+
+      // 2) Update the job doc to reflect completion + include assets list
       await updateDoc(jobRef, {
         status: 'mock_done',
-        assets,
-        generatedCount: assets.length,
+        assets: createdAssets,
+        generatedCount: createdAssets.length,
         finishedAt: serverTimestamp(),
         ms: Date.now() - startedAt,
         updatedAt: serverTimestamp(),
@@ -150,9 +188,10 @@ export async function POST(req: NextRequest) {
         runId,
         rowId,
         jobId: jobRef.id,
-        count: assets.length,
+        count: createdAssets.length,
       });
 
+      // 3) Respond to n8n with real asset IDs + URLs
       return NextResponse.json(
         {
           ok: true,
@@ -161,8 +200,8 @@ export async function POST(req: NextRequest) {
           rowId,
           jobId: jobRef.id,
           mock: true,
-          count: assets.length,
-          assets,
+          count: createdAssets.length,
+          assets: createdAssets,
         },
         { status: 200 }
       );
