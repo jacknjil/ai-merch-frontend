@@ -43,6 +43,11 @@ function getOrigin(req: NextRequest): string {
 }
 
 export async function POST(req: NextRequest) {
+  const secret = req.headers.get("x-n8n-secret");
+  if (!process.env.N8N_SHARED_SECRET || secret !== process.env.N8N_SHARED_SECRET) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+}
+
   const startedAt = Date.now();
   const requestId = randomUUID();
 
