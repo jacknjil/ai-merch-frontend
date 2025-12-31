@@ -131,12 +131,9 @@ export async function POST(req: NextRequest) {
     });
 
     // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
-    // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
     // BUT: we DO create Firestore `assets` docs so the Gallery can read from `assets`
     if (isMock) {
       const origin = getOrigin(req);
-
-      // Best practice: serve from /mock.png (public folder root), not /public/mock.png
       const placeholderUrl = process.env.MOCK_IMAGE_URL || `${origin}/mock.png`;
 
       // 1) Create assets docs (published=false) so Gallery has real data
@@ -150,6 +147,7 @@ export async function POST(req: NextRequest) {
           niche,
           style,
           imageUrl: placeholderUrl,
+          thumbUrl: placeholderUrl,
 
           // No Storage path in mock mode
           storagePath: '',
@@ -330,6 +328,7 @@ export async function POST(req: NextRequest) {
         niche,
         style,
         imageUrl: url,
+        thumbUrl: url,
         storagePath: filename,
         source: 'n8n',
         runId,
