@@ -135,7 +135,7 @@ export default function GalleryPage() {
             }}
           >
             {assets.map((asset) => {
-              const src = asset.thumbUrl || asset.imageUrl || 'mock.png';
+              const src = asset.imageUrl || asset.thumbUrl || '/mock.png';
               return (
                 <Link
                   key={asset.id}
