@@ -1,14 +1,16 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import React, { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import Image from 'next/image';
 
 type AssetDoc = {
   id: string;
   title: string;
   imageUrl: string;
+  thumbUrl: string;
   niche?: string;
 };
 
@@ -34,25 +36,28 @@ export default function AssetDetailPage() {
     async function load() {
       try {
         // Load asset
-        const assetSnap = await getDoc(doc(db, "assets", assetId));
+        const assetSnap = await getDoc(doc(db, 'assets', assetId));
         if (!assetSnap.exists()) {
-          throw new Error("Asset not found");
+          throw new Error('Asset not found');
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const aData = assetSnap.data() as any;
         setAsset({
           id: assetSnap.id,
-          title: aData.title ?? "Untitled",
-          imageUrl: aData.imageUrl ?? "",
+          title: aData.title ?? 'Untitled',
+          imageUrl: aData.imageUrl ?? '',
+          thumbUrl: aData.thumbUrl ?? '',
           niche: aData.niche,
         });
 
         // Load products
-        const prodSnap = await getDocs(collection(db, "products"));
+        const prodSnap = await getDocs(collection(db, 'products'));
         const list: ProductDoc[] = prodSnap.docs.map((d) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const p = d.data() as any;
           return {
             id: d.id,
-            name: p.name ?? "Unnamed product",
+            name: p.name ?? 'Unnamed product',
             base_price: p.base_price,
             mockup_base_image: p.mockup_base_image,
             category: p.category,
@@ -60,9 +65,10 @@ export default function AssetDetailPage() {
         });
 
         setProducts(list);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error(err);
-        setError(err?.message ?? "Error loading asset/products");
+        setError(err?.message ?? 'Error loading asset/products');
       } finally {
         setLoading(false);
       }
@@ -88,50 +94,52 @@ export default function AssetDetailPage() {
     return (
       <main style={{ padding: 24 }}>
         <h1>Asset</h1>
-        <p style={{ color: "red" }}>{error ?? "Asset not found."}</p>
+        <p style={{ color: 'red' }}>{error ?? 'Asset not found.'}</p>
       </main>
     );
   }
+
+  const assetSrc = asset.imageUrl || asset.thumbUrl || 'mock.png';
 
   return (
     <main
       style={{
         padding: 24,
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 2fr)",
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 2fr)',
         gap: 24,
-        alignItems: "flex-start",
+        alignItems: 'flex-start',
       }}
     >
       {/* Left: Asset preview */}
       <div>
         <h1>{asset.title}</h1>
         {asset.niche && (
-          <p style={{ color: "#9ca3af", marginTop: 4 }}>Niche: {asset.niche}</p>
+          <p style={{ color: '#9ca3af', marginTop: 4 }}>Niche: {asset.niche}</p>
         )}
 
         <div
           style={{
             marginTop: 16,
             borderRadius: 12,
-            overflow: "hidden",
-            border: "1px solid #1f2937",
+            overflow: 'hidden',
+            border: '1px solid #1f2937',
             maxWidth: 480,
           }}
         >
           {asset.imageUrl ? (
-            <img
-              src={asset.imageUrl}
+            <Image
+              src={assetSrc}
               alt={asset.title}
-              style={{ width: "100%", display: "block" }}
+              style={{ width: '100%', display: 'block' }}
             />
           ) : (
             <div
               style={{
-                width: "100%",
+                width: '100%',
                 padding: 40,
-                textAlign: "center",
-                background: "#111827",
+                textAlign: 'center',
+                background: '#111827',
               }}
             >
               No image
@@ -147,8 +155,8 @@ export default function AssetDetailPage() {
 
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             gap: 16,
             marginTop: 16,
           }}
@@ -158,32 +166,32 @@ export default function AssetDetailPage() {
               key={p.id}
               style={{
                 borderRadius: 12,
-                border: "1px solid #1f2937",
-                background: "#020617",
-                overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
+                border: '1px solid #1f2937',
+                background: '#020617',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
               <div
                 style={{
-                  width: "100%",
-                  aspectRatio: "1 / 1",
-                  background: "#111827",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  overflow: "hidden",
+                  width: '100%',
+                  aspectRatio: '1 / 1',
+                  background: '#111827',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
                 }}
               >
                 {p.mockup_base_image ? (
-                  <img
+                  <Image
                     src={p.mockup_base_image}
                     alt={p.name}
+                    fill
+                    sizes="max-width: 1024px 50vx, 220px"
                     style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
+                      objectFit: 'cover',
                     }}
                   />
                 ) : (
@@ -194,7 +202,7 @@ export default function AssetDetailPage() {
                 <h3
                   style={{
                     margin: 0,
-                    fontSize: "1rem",
+                    fontSize: '1rem',
                     marginBottom: 4,
                   }}
                 >
@@ -204,8 +212,8 @@ export default function AssetDetailPage() {
                   <p
                     style={{
                       margin: 0,
-                      fontSize: "0.9rem",
-                      color: "#9ca3af",
+                      fontSize: '0.9rem',
+                      color: '#9ca3af',
                     }}
                   >
                     ${p.base_price.toFixed(2)}
@@ -214,19 +222,19 @@ export default function AssetDetailPage() {
                 {p.category && (
                   <p
                     style={{
-                      margin: "4px 0 0",
-                      fontSize: "0.8rem",
-                      color: "#6b7280",
+                      margin: '4px 0 0',
+                      fontSize: '0.8rem',
+                      color: '#6b7280',
                     }}
                   >
                     {p.category}
                   </p>
                 )}
               </div>
-              <div style={{ padding: "0 12px 12px" }}>
+              <div style={{ padding: '0 12px 12px' }}>
                 <button
                   onClick={() => handleCustomize(p.id)}
-                  style={{ width: "100%" }}
+                  style={{ width: '100%' }}
                 >
                   Customize with this
                 </button>
