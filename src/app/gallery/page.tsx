@@ -10,6 +10,7 @@ type Asset = {
   id: string;
   title?: string;
   imageUrl?: string;
+  thumbUrl?: string;
   niche?: string;
   source?: string;
   createdAt?: Date;
@@ -57,6 +58,7 @@ export default function GalleryPage() {
             title: data.title ?? '',
             niche: data.niche ?? '',
             imageUrl: data.imageUrl ?? '',
+            thumbUrl: data.thumbUrl ?? data.imageUrl ?? '',
             source: data.source ?? '',
             published: data.published,
             createdAt,
@@ -132,79 +134,82 @@ export default function GalleryPage() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
             }}
           >
-            {assets.map((asset) => (
-              <Link
-                key={asset.id}
-                href={`/asset/${asset.id}`}
-                style={{
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  background: '#fff',
-                }}
-              >
-                <div
+            {assets.map((asset) => {
+              const src = asset.thumbUrl || asset.imageUrl || 'mock.png';
+              return (
+                <Link
+                  key={asset.id}
+                  href={`/asset/${asset.id}`}
                   style={{
-                    position: 'relative',
-                    width: '100%',
-                    aspectRatio: '1 / 1',
-                    background: '#f3f4f6',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    background: '#fff',
                   }}
                 >
-                  <Image
-                    src={asset.imageUrl || '/mock.png'}
-                    alt={asset.title || 'Generated design'}
-                    fill
-                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                    style={{ objectFit: 'cover' }}
-                  />
-                </div>
+                  <div
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      aspectRatio: '1 / 1',
+                      background: '#f3f4f6',
+                    }}
+                  >
+                    <Image
+                      src={src}
+                      alt={asset.title || 'Generated design'}
+                      fill
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                      style={{ objectFit: 'cover' }}
+                    />
+                  </div>
 
-                <div style={{ padding: 12 }}>
-                  <p style={{ margin: 0, fontWeight: 600 }}>
-                    {asset.title || 'Untitled'}
-                  </p>
-
-                  {asset.niche && (
-                    <p
-                      style={{
-                        margin: '4px 0 0 0',
-                        fontSize: '0.85rem',
-                        color: '#6b7280',
-                      }}
-                    >
-                      {asset.niche}
+                  <div style={{ padding: 12 }}>
+                    <p style={{ margin: 0, fontWeight: 600 }}>
+                      {asset.title || 'Untitled'}
                     </p>
-                  )}
 
-                  {asset.createdAt && (
-                    <p
-                      style={{
-                        margin: '6px 0 0 0',
-                        fontSize: '0.75rem',
-                        color: '#9ca3af',
-                      }}
-                    >
-                      {asset.createdAt.toLocaleString()}
-                    </p>
-                  )}
+                    {asset.niche && (
+                      <p
+                        style={{
+                          margin: '4px 0 0 0',
+                          fontSize: '0.85rem',
+                          color: '#6b7280',
+                        }}
+                      >
+                        {asset.niche}
+                      </p>
+                    )}
 
-                  {asset.source && (
-                    <p
-                      style={{
-                        margin: '4px 0 0 0',
-                        fontSize: '0.75rem',
-                        color: '#6b7280',
-                      }}
-                    >
-                      Source: {asset.source}
-                    </p>
-                  )}
-                </div>
-              </Link>
-            ))}
+                    {asset.createdAt && (
+                      <p
+                        style={{
+                          margin: '6px 0 0 0',
+                          fontSize: '0.75rem',
+                          color: '#9ca3af',
+                        }}
+                      >
+                        {asset.createdAt.toLocaleString()}
+                      </p>
+                    )}
+
+                    {asset.source && (
+                      <p
+                        style={{
+                          margin: '4px 0 0 0',
+                          fontSize: '0.75rem',
+                          color: '#6b7280',
+                        }}
+                      >
+                        Source: {asset.source}
+                      </p>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </>
       )}
