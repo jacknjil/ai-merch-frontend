@@ -1,7 +1,8 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import { PROMPT_TEMPLATES } from "@/lib/promptTemplates";
+import React, { useState } from 'react';
+import { PROMPT_TEMPLATES } from '@/lib/promptTemplates';
+import Image from 'next/image';
 
 type GeneratedAsset = {
   id: string;
@@ -11,18 +12,18 @@ type GeneratedAsset = {
 };
 
 export default function GenerateAssetPage() {
-  const [prompt, setPrompt] = useState("");
-  const [title, setTitle] = useState("");
-  const [niche, setNiche] = useState("");
+  const [prompt, setPrompt] = useState('');
+  const [title, setTitle] = useState('');
+  const [niche, setNiche] = useState('');
   const [count, setCount] = useState<number>(1);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
-      setError("Please enter a prompt.");
+      setError('Please enter a prompt.');
       return;
     }
     setError(null);
@@ -30,45 +31,53 @@ export default function GenerateAssetPage() {
     setGeneratedAssets([]);
 
     try {
-      const res = await fetch("/api/generate-asset", {
-        method: "POST",
+      const res = await fetch('/api/generate-asset', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           prompt,
           title: title || prompt.slice(0, 60),
-          niche: niche || "general",
+          niche: niche || 'general',
           count,
         }),
       });
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Generation failed");
+        throw new Error(body.error || 'Generation failed');
       }
 
       const data = await res.json();
       const assets: GeneratedAsset[] = data.assets ?? [];
       setGeneratedAssets(assets);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Unexpected error");
+      setError(err.message || 'Unexpected error');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
+    <main style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <h1>AI Asset Generator (Batch)</h1>
-      <p style={{ color: "#9ca3af" }}>
+      <p style={{ color: '#9ca3af' }}>
         Use a template or custom prompt to generate multiple designs at once.
-        All images are uploaded to Storage and registered in your{" "}
+        All images are uploaded to Storage and registered in your{' '}
         <code>assets</code> collection.
       </p>
 
-      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
         {/* Title */}
         <label>
           Title (optional):
@@ -76,18 +85,18 @@ export default function GenerateAssetPage() {
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            style={{ width: "100%", padding: 8, marginTop: 4 }}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}
           />
         </label>
 
         {/* Niche */}
         <label>
-          Niche (optional, e.g. "80s-retro", "kawaii-animals"):
+          Niche (optional, e.g. 80s-retro&quot;, kawaii-animals&quot;):
           <input
             type="text"
             value={niche}
             onChange={(e) => setNiche(e.target.value)}
-            style={{ width: "100%", padding: 8, marginTop: 4 }}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}
           />
         </label>
 
@@ -103,15 +112,15 @@ export default function GenerateAssetPage() {
               if (tmpl) {
                 setPrompt(
                   tmpl.build({
-                    subject: "a mountain",
-                    animal: "a fox",
-                    character: "a robot",
-                    theme: "a forest at sunset",
+                    subject: 'a mountain',
+                    animal: 'a fox',
+                    character: 'a robot',
+                    theme: 'a forest at sunset',
                   })
                 );
               }
             }}
-            style={{ width: "100%", padding: 8, marginTop: 4 }}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}
           >
             <option value="">-- Select Template --</option>
             {PROMPT_TEMPLATES.map((t) => (
@@ -135,7 +144,7 @@ export default function GenerateAssetPage() {
             }
             style={{ width: 100, padding: 8, marginTop: 4 }}
           />
-          <span style={{ marginLeft: 8, fontSize: "0.9rem", color: "#9ca3af" }}>
+          <span style={{ marginLeft: 8, fontSize: '0.9rem', color: '#9ca3af' }}>
             (1–8, keep small while testing)
           </span>
         </label>
@@ -147,7 +156,7 @@ export default function GenerateAssetPage() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={5}
-            style={{ width: "100%", padding: 8, marginTop: 4 }}
+            style={{ width: '100%', padding: 8, marginTop: 4 }}
             placeholder="Describe the design(s) you want to generate..."
           />
         </label>
@@ -158,32 +167,32 @@ export default function GenerateAssetPage() {
           disabled={loading}
           style={{
             marginTop: 8,
-            padding: "8px 16px",
+            padding: '8px 16px',
             borderRadius: 8,
-            border: "1px solid #1f2937",
-            background: loading ? "#374151" : "#2563eb",
-            color: "white",
-            cursor: loading ? "default" : "pointer",
+            border: '1px solid #1f2937',
+            background: loading ? '#374151' : '#2563eb',
+            color: 'white',
+            cursor: loading ? 'default' : 'pointer',
           }}
         >
-          {loading ? `Generating ${count} image(s)...` : `Generate ${count} image(s)`}
+          {loading
+            ? `Generating ${count} image(s)...`
+            : `Generate ${count} image(s)`}
         </button>
 
-        {error && (
-          <p style={{ color: "#f87171", marginTop: 8 }}>{error}</p>
-        )}
+        {error && <p style={{ color: '#f87171', marginTop: 8 }}>{error}</p>}
 
         {/* Results grid */}
         {generatedAssets.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <p style={{ marginBottom: 8 }}>
               Generated {generatedAssets.length} asset
-              {generatedAssets.length > 1 ? "s" : ""} (also saved to Gallery):
+              {generatedAssets.length > 1 ? 's' : ''} (also saved to Gallery):
             </p>
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
                 gap: 12,
               }}
             >
@@ -192,38 +201,38 @@ export default function GenerateAssetPage() {
                   key={asset.id}
                   style={{
                     borderRadius: 12,
-                    border: "1px solid #1f2937",
-                    background: "#020617",
+                    border: '1px solid #1f2937',
+                    background: '#020617',
                     padding: 8,
                   }}
                 >
                   <div
                     style={{
-                      width: "100%",
-                      aspectRatio: "1 / 1",
+                      width: '100%',
+                      aspectRatio: '1 / 1',
                       borderRadius: 8,
-                      overflow: "hidden",
+                      overflow: 'hidden',
                       marginBottom: 6,
-                      background: "#111827",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      background: '#111827',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
-                    <img
+                    <Image
                       src={asset.imageUrl}
                       alt={asset.title}
                       style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
                       }}
                     />
                   </div>
                   <p
                     style={{
                       margin: 0,
-                      fontSize: "0.85rem",
+                      fontSize: '0.85rem',
                     }}
                   >
                     {asset.title}
@@ -231,8 +240,8 @@ export default function GenerateAssetPage() {
                   <p
                     style={{
                       margin: 0,
-                      fontSize: "0.75rem",
-                      color: "#9ca3af",
+                      fontSize: '0.75rem',
+                      color: '#9ca3af',
                     }}
                   >
                     {asset.niche}
