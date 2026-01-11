@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import React, { useEffect, useState } from 'react';
+import { db } from '@/lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
 
 const TestPage: React.FC = () => {
   const [count, setCount] = useState<number | null>(null);
@@ -11,11 +11,12 @@ const TestPage: React.FC = () => {
   useEffect(() => {
     async function load() {
       try {
-        const snapshot = await getDocs(collection(db, "assets"));
+        const snapshot = await getDocs(collection(db, 'assets'));
         setCount(snapshot.size);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error(err);
-        setError(err?.message ?? "Unknown error");
+        setError(err?.message ?? 'Unknown error');
       }
     }
 
@@ -26,7 +27,7 @@ const TestPage: React.FC = () => {
     <main style={{ padding: 24 }}>
       <h1>Firestore Test</h1>
 
-      {error && <p style={{ color: "red" }}>Error: {error}</p>}
+      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
 
       {count !== null && !error && (
         <p>

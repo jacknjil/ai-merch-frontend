@@ -81,6 +81,9 @@ export default function AssetDetailPage() {
     router.push(`/studio?assetId=${assetId}&productId=${productId}`);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assetSrc = asset?.imageUrl || (asset as any)?.thumbUrl || 'mock.png';
+
   if (loading) {
     return (
       <main style={{ padding: 24 }}>
@@ -98,9 +101,6 @@ export default function AssetDetailPage() {
       </main>
     );
   }
-
-  const assetSrc = asset.imageUrl || asset.thumbUrl || 'mock.png';
-
   return (
     <main
       style={{
