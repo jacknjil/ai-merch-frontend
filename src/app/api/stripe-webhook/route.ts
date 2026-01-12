@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
     // IMPORTANT: use raw text body for webhook verification
     const body = await req.text();
     event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
     console.error('⚠️  Webhook signature verification failed.', err);
     return NextResponse.json(
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
       raw: event,
       createdAt: serverTimestamp(),
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
     console.error('[stripe-webhook] Failed to log event to Firestore:', err);
     // Don't break the webhook if logging fails

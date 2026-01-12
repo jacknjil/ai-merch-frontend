@@ -1,10 +1,10 @@
-import Stripe from "stripe";
-import { NextRequest, NextResponse } from "next/server";
+import Stripe from 'stripe';
+import { NextRequest, NextResponse } from 'next/server';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
 if (!stripeSecretKey) {
-  throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+  throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
 }
 
 const stripe = new Stripe(stripeSecretKey);
@@ -23,20 +23,17 @@ export async function POST(req: NextRequest) {
     }> = body.items ?? [];
 
     if (!items.length) {
-      return NextResponse.json(
-        { error: "No items provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No items provided' }, { status: 400 });
     }
 
     // TEMP: flat price per item (e.g. $25.00)
     const UNIT_AMOUNT_CENTS = 2500;
 
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
-      items.map((item) => ({
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = items.map(
+      (item) => ({
         quantity: item.quantity || 1,
         price_data: {
-          currency: "usd",
+          currency: 'usd',
           unit_amount: UNIT_AMOUNT_CENTS,
           product_data: {
             name: `${item.productName} - ${item.assetTitle}`,
@@ -47,28 +44,29 @@ export async function POST(req: NextRequest) {
             },
           },
         },
-      }));
+      })
+    );
 
-    const origin =
-      req.headers.get("origin") || "http://localhost:3000";
+    const origin = req.headers.get('origin') || 'http://localhost:3000';
 
     const session = await stripe.checkout.sessions.create({
-      mode: "payment",
+      mode: 'payment',
       line_items: lineItems,
       success_url: `${origin}/cart?status=success`,
       cancel_url: `${origin}/cart?status=cancel`,
-      
+
       metadata: {
-    userId: body.userId ?? "unknown",
-    cartItemIds: JSON.stringify(items.map(i => i.id)),
+        userId: body.userId ?? 'unknown',
+        cartItemIds: JSON.stringify(items.map((i) => i.id)),
       },
     });
 
     return NextResponse.json({ url: session.url });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    console.error("Error creating checkout session:", err);
+    console.error('Error creating checkout session:', err);
     return NextResponse.json(
-      { error: err?.message ?? "Internal server error" },
+      { error: err?.message ?? 'Internal server error' },
       { status: 500 }
     );
   }
