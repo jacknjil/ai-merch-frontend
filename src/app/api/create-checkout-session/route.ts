@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const createdAtMs = Date.now();
 
   // Create ref once so catch() can update it too
-  const checkoutRef = adminDb.collection('checkout_sessions').doc(checkoutId);
+  const checkoutRef = adminDb().collection('checkout_sessions').doc(checkoutId);
 
   try {
     const body = await req.json();
