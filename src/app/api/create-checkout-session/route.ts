@@ -1,15 +1,13 @@
 import Stripe from 'stripe';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { adminDb, FieldValue } from '@/lib/firebaseAdmin';
 
-import { db } from '@/lib/firebase';
-import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+export const runtime = 'nodejs';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-
-if (!stripeSecretKey) {
+if (!stripeSecretKey)
   throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
-}
 
 const stripe = new Stripe(stripeSecretKey);
 
@@ -24,8 +22,11 @@ function getOrigin(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const checkoutId = randomUUID(); // <-- our Firestore doc id
+  const checkoutId = randomUUID(); // our Firestore doc id
   const createdAtMs = Date.now();
+
+  // Create ref once so catch() can update it too
+  const checkoutRef = adminDb.collection('checkout_sessions').doc(checkoutId);
 
   try {
     const body = await req.json();
@@ -37,7 +38,6 @@ export async function POST(req: NextRequest) {
       assetTitle: string;
       productName: string;
       quantity: number;
-      // optional fields you might already have:
       mockupImageUrl?: string | null;
       scale?: number;
       position?: { x: number; y: number };
@@ -55,16 +55,18 @@ export async function POST(req: NextRequest) {
       quantity: Number.isFinite(i.quantity) && i.quantity > 0 ? i.quantity : 1,
     }));
 
+    const itemCount = normalizedItems.reduce((sum, i) => sum + i.quantity, 0);
     const subtotalCents = normalizedItems.reduce(
       (sum, i) => sum + i.quantity * UNIT_AMOUNT_CENTS,
       0
     );
 
     // ✅ STEP A-1: create Firestore checkout_sessions doc BEFORE Stripe redirect
-    await setDoc(doc(db, 'checkout_sessions', checkoutId), {
+    await checkoutRef.set({
+      checkoutId,
       status: 'created',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
 
       user: {
         userId: body.userId ?? 'unknown',
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
       amounts: {
         currency: 'usd',
         unitAmountCents: UNIT_AMOUNT_CENTS,
-        itemCount: normalizedItems.reduce((sum, i) => sum + i.quantity, 0),
+        itemCount,
         subtotalCents,
       },
 
@@ -82,7 +84,6 @@ export async function POST(req: NextRequest) {
         paymentIntentId: null,
       },
 
-      // keep items exactly so the webhook can copy into orders
       items: normalizedItems.map((i) => ({
         cartItemId: i.id,
         assetId: i.assetId,
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
         productName: i.productName,
         quantity: i.quantity,
 
-        // optional “nice to have” for manual fulfillment:
+        // optional for manual fulfillment:
         mockupImageUrl: i.mockupImageUrl ?? null,
         scale: i.scale ?? null,
         position: i.position ?? null,
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Stripe line items (unchanged logic, just uses normalized items)
+    // Stripe line items
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
       normalizedItems.map((item) => ({
         quantity: item.quantity,
@@ -126,23 +127,21 @@ export async function POST(req: NextRequest) {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: lineItems,
-      success_url: `${origin}/cart?status=success`,
-      cancel_url: `${origin}/cart?status=cancel`,
+      success_url: `${origin}/cart?status=success&checkoutId=${checkoutId}`,
+      cancel_url: `${origin}/cart?status=cancel&checkoutId=${checkoutId}`,
 
       metadata: {
-        checkoutId, // <-- IMPORTANT: webhook will use this
+        checkoutId,
         userId: body.userId ?? 'unknown',
       },
-
-      // Optional nice-to-have (not required):
-      // client_reference_id: checkoutId,
     });
 
     // ✅ STEP A-3: update checkout_sessions doc with stripe.sessionId
-    await updateDoc(doc(db, 'checkout_sessions', checkoutId), {
+    await checkoutRef.update({
       status: 'stripe_created',
-      updatedAt: serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
       'stripe.sessionId': session.id,
+      'stripe.paymentIntentId': session.payment_intent ?? null,
     });
 
     return NextResponse.json({ url: session.url, checkoutId });
@@ -152,11 +151,14 @@ export async function POST(req: NextRequest) {
 
     // Best effort: mark Firestore doc as error (if it exists)
     try {
-      await updateDoc(doc(db, 'checkout_sessions', checkoutId), {
-        status: 'error',
-        updatedAt: serverTimestamp(),
-        error: err?.message ?? 'Internal server error',
-      });
+      await checkoutRef.set(
+        {
+          status: 'error',
+          updatedAt: FieldValue.serverTimestamp(),
+          error: err?.message ?? 'Internal server error',
+        },
+        { merge: true }
+      );
     } catch {}
 
     return NextResponse.json(
