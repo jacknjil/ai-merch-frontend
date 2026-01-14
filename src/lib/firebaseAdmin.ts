@@ -3,8 +3,7 @@ import admin from 'firebase-admin';
 
 let _app: admin.app.App | null = null;
 
-function getApp() {
-  // Reuse existing app if hot reloaded / reused
+function getAdminApp() {
   if (_app) return _app;
   if (admin.apps.length) {
     _app = admin.app();
@@ -14,7 +13,7 @@ function getApp() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   const bucket = process.env.FIREBASE_STORAGE_BUCKET;
 
-  // IMPORTANT: don't crash the build. Only throw when actually used at runtime.
+  // Option A: JSON in env var (best for docker env-file)
   if (raw) {
     const svc = JSON.parse(raw);
     _app = admin.initializeApp({
@@ -24,6 +23,7 @@ function getApp() {
     return _app;
   }
 
+  // Option B: File path (mount JSON into container)
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     _app = admin.initializeApp({
       credential: admin.credential.applicationDefault(),
@@ -32,17 +32,19 @@ function getApp() {
     return _app;
   }
 
+  // IMPORTANT: this throw is OK because it's inside getAdminApp()
+  // and won't execute during build unless you call adminDb/adminBucket.
   throw new Error(
-    'Missing FIREBASE_SERVICE_ACCOUNT_JSON (preferred) or GOOGLE_APPLICATION_CREDENTIALS'
+    'Missing FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS'
   );
 }
 
 export function adminDb() {
-  return getApp().firestore();
+  return getAdminApp().firestore();
 }
 
 export function adminBucket() {
-  return getApp().storage().bucket();
+  return getAdminApp().storage().bucket();
 }
 
 export const FieldValue = admin.firestore.FieldValue;

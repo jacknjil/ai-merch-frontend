@@ -4,8 +4,6 @@ import { randomUUID } from 'crypto';
 import OpenAI from 'openai';
 import { adminDb, adminBucket, FieldValue } from '@/lib/firebaseAdmin';
 
-const db = adminDb();
-
 export const runtime = 'nodejs';
 
 // ---------- helpers ----------
@@ -106,6 +104,7 @@ async function getUsedTodayCount(timeZone: string) {
   const dayStart = zonedTimeToUtcDate(timeZone, year, month, day, 0, 0, 0);
 
   // Use Firestore aggregation count() when available
+  const db = adminDb();
   const q = db.collection('assets').where('createdAt', '>=', dayStart);
 
   try {
@@ -152,6 +151,7 @@ async function uploadPngAndGetUrl(storagePath: string, png: Buffer) {
 // ---------- route ----------
 
 export async function POST(req: NextRequest) {
+  const db = adminDb();
   // 0) Auth (n8n shared secret)
   const secret = req.headers.get('x-n8n-secret');
   if (
