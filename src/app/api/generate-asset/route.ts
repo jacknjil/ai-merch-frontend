@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import OpenAI from 'openai';
 import { adminDb, adminBucket, FieldValue } from '@/lib/firebaseAdmin';
 
+const db = adminDb();
+
 export const runtime = 'nodejs';
 
 // ---------- helpers ----------
@@ -104,7 +106,7 @@ async function getUsedTodayCount(timeZone: string) {
   const dayStart = zonedTimeToUtcDate(timeZone, year, month, day, 0, 0, 0);
 
   // Use Firestore aggregation count() when available
-  const q = adminDb.collection('assets').where('createdAt', '>=', dayStart);
+  const q = db.collection('assets').where('createdAt', '>=', dayStart);
 
   try {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -129,7 +131,8 @@ function makeFirebaseDownloadUrl(
 }
 
 async function uploadPngAndGetUrl(storagePath: string, png: Buffer) {
-  const file = adminBucket.file(storagePath);
+  const bucket = adminBucket();
+  const file = bucket.file(storagePath);
   const token = randomUUID();
 
   await file.save(png, {
@@ -212,7 +215,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1) Create job doc early (jobId always exists)
-    jobRef = await adminDb.collection('jobs').add({
+    jobRef = await db.collection('jobs').add({
       requestId,
       runId,
       rowId: rowId?.toString?.() ?? rowId,
@@ -243,7 +246,7 @@ export async function POST(req: NextRequest) {
       const createdAssets: Array<{ assetId: string; imageUrl: string }> = [];
 
       for (let i = 0; i < count; i++) {
-        const assetDoc = await adminDb.collection('assets').add({
+        const assetDoc = await db.collection('assets').add({
           title,
           prompt: promptRaw,
           niche,
@@ -370,14 +373,12 @@ export async function POST(req: NextRequest) {
       let png: Buffer | null = null;
 
       // Prefer b64_json (cheapest path)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       if ((out as any)?.b64_json) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         png = Buffer.from((out as any).b64_json, 'base64');
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } else if ((out as any)?.url) {
         // fallback: fetch remote URL if provided
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const resp = await fetch((out as any).url);
         if (!resp.ok) {
           log('create_asset.fetch_failed', {
@@ -385,7 +386,7 @@ export async function POST(req: NextRequest) {
             runId,
             rowId,
             jobId: jobRef.id,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
             url: (out as any).url,
             status: resp.status,
           });
@@ -403,7 +404,7 @@ export async function POST(req: NextRequest) {
       }.png`;
       const imageUrl = await uploadPngAndGetUrl(storagePath, png);
 
-      const assetDoc = await adminDb.collection('assets').add({
+      const assetDoc = await db.collection('assets').add({
         title,
         prompt: promptRaw,
         niche,
@@ -483,7 +484,6 @@ export async function POST(req: NextRequest) {
       },
       { status: 200 }
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
     const msg = String(err?.message ?? 'Internal server error');
 
