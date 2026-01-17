@@ -1,18 +1,8 @@
+// src/app/api/n8n/create-asset/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/openai';
-import { db, storage } from '@/lib/firebase';
-import {
-  collection,
-  addDoc,
-  updateDoc,
-  serverTimestamp,
-  query,
-  where,
-  getCountFromServer,
-  Timestamp,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { randomUUID } from 'crypto';
+import { openai } from '@/lib/openai';
+import { adminDb, adminBucket, FieldValue } from '@/lib/firebaseAdmin';
 
 export const runtime = 'nodejs';
 
@@ -33,13 +23,51 @@ function asBool(v: any): boolean {
 }
 
 function getOrigin(req: NextRequest): string {
-  // Works behind reverse proxies too
   const proto = req.headers.get('x-forwarded-proto') || 'https';
   const host =
     req.headers.get('x-forwarded-host') ||
     req.headers.get('host') ||
     req.nextUrl.host;
   return `${proto}://${host}`;
+}
+
+// YYYY-MM-DD in America/Chicago (your timezone)
+function dayKeyChicago(d = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+class RateLimitError extends Error {
+  usedToday: number;
+  cap: number;
+  constructor(message: string, usedToday: number, cap: number) {
+    super(message);
+    this.usedToday = usedToday;
+    this.cap = cap;
+  }
+}
+
+async function uploadPngAndGetUrl(storagePath: string, png: Buffer) {
+  const file = adminBucket.file(storagePath);
+  const token = randomUUID();
+
+  await file.save(png, {
+    contentType: 'image/png',
+    resumable: false,
+    metadata: {
+      metadata: {
+        firebaseStorageDownloadTokens: token,
+      },
+    },
+  });
+
+  const bucketName = adminBucket.name;
+  const encoded = encodeURIComponent(storagePath);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encoded}?alt=media&token=${token}`;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,7 +78,7 @@ export async function POST(req: NextRequest) {
   ) {
     return NextResponse.json(
       { ok: false, error: 'Unauthorized' },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -62,13 +90,11 @@ export async function POST(req: NextRequest) {
   let rowId: string | number | null = null;
 
   // Firestore job doc ref stored here once created
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let jobRef: any = null;
+  let jobRef: FirebaseFirestore.DocumentReference | null = null;
 
   try {
     const body = await req.json();
 
-    // Assign to OUTER variables (do NOT redeclare with const)
     runId = body.runId ?? requestId;
     rowId = body.rowId ?? body.id ?? null;
 
@@ -77,17 +103,18 @@ export async function POST(req: NextRequest) {
     const title = (body.title ?? 'AI generated design').toString();
     const style = body.style ? body.style.toString() : '';
 
-    // Safe mock parsing: supports boolean/string/env
-    const isMock = asBool(body.mock) || asBool(process.env.MOCK_MODE);
+    const isMock =
+      asBool(body.mock) ||
+      asBool(process.env.MOCK_MODE) ||
+      asBool(process.env.NEXT_PUBLIC_MOCK_MODE);
 
-    console.log(
-      'create-asset: isMock =',
+    log('create_asset.request', {
+      requestId,
+      runId,
+      rowId,
       isMock,
-      'body.mock =',
-      body.mock,
-      'MOCK_MODE =',
-      process.env.MOCK_MODE
-    );
+      bodyMock: body.mock,
+    });
 
     if (!promptRaw) {
       log('create_asset.bad_request', {
@@ -98,7 +125,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(
         { ok: false, requestId, runId, rowId, error: 'Missing prompt' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -106,8 +133,8 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(count) || count < 1) count = 1;
     if (count > 8) count = 8;
 
-    // ✅ Create the job doc FIRST so jobId exists for BOTH mock + real.
-    jobRef = await addDoc(collection(db, 'jobs'), {
+    // ✅ Create job FIRST so jobId always exists
+    jobRef = await adminDb.collection('jobs').add({
       requestId,
       runId,
       rowId: rowId?.toString?.() ?? rowId,
@@ -117,8 +144,8 @@ export async function POST(req: NextRequest) {
       style,
       requestedCount: count,
       isMock,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
     log('create_asset.start', {
@@ -131,54 +158,41 @@ export async function POST(req: NextRequest) {
     });
 
     // ✅ MOCK SHORT-CIRCUIT (NO OPENAI, NO STORAGE UPLOADS)
-    // BUT: we DO create Firestore `assets` docs so the Gallery can read from `assets`
+    // BUT: create Firestore `assets` docs so the Gallery can read them
     if (isMock) {
       const origin = getOrigin(req);
       const placeholderUrl = process.env.MOCK_IMAGE_URL || `${origin}/mock.png`;
 
-      // 1) Create assets docs (published=false) so Gallery has real data
       const createdAssets: { assetId: string; imageUrl: string }[] = [];
 
       for (let i = 0; i < count; i++) {
-        const docRef = await addDoc(collection(db, 'assets'), {
+        const docRef = await adminDb.collection('assets').add({
           title,
-          // Store the concept prompt (not the full expanded style string if you prefer)
           prompt: promptRaw,
           niche,
           style,
           imageUrl: placeholderUrl,
           thumbUrl: placeholderUrl,
-
-          // No Storage path in mock mode
           storagePath: '',
           source: 'mock',
-
-          // link back for debugging/traceability
           runId,
           rowId: rowId?.toString?.() ?? rowId,
-          jobId: jobRef?.id ?? null,
-
-          // economy MVP gating
+          jobId: jobRef.id,
           published: false,
-
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
 
-        createdAssets.push({
-          assetId: docRef.id, // ✅ real Firestore doc id
-          imageUrl: placeholderUrl,
-        });
+        createdAssets.push({ assetId: docRef.id, imageUrl: placeholderUrl });
       }
 
-      // 2) Update the job doc to reflect completion + include assets list
-      await updateDoc(jobRef, {
+      await jobRef.update({
         status: 'mock_done',
         assets: createdAssets,
         generatedCount: createdAssets.length,
-        finishedAt: serverTimestamp(),
+        finishedAt: FieldValue.serverTimestamp(),
         ms: Date.now() - startedAt,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       log('create_asset.mock_done', {
@@ -189,7 +203,6 @@ export async function POST(req: NextRequest) {
         count: createdAssets.length,
       });
 
-      // 3) Respond to n8n with real asset IDs + URLs
       return NextResponse.json(
         {
           ok: true,
@@ -201,68 +214,79 @@ export async function POST(req: NextRequest) {
           count: createdAssets.length,
           assets: createdAssets,
         },
-        { status: 200 }
+        { status: 200 },
       );
     }
 
-    // ---- Daily cap (real generations only) ----
-    const DAILY_CAP = Number(process.env.DAILY_CAP ?? 10); // economy default
-    const now = new Date();
+    // ✅ DAILY CAP (real generations only) using counter doc (fast + reliable)
+    const DAILY_CAP = Number(process.env.DAILY_CAP ?? 10);
+    const dayKey = dayKeyChicago();
+    const capRef = adminDb
+      .collection('rate_limits')
+      .doc('daily')
+      .collection('days')
+      .doc(dayKey);
 
-    // Simple + consistent boundary (UTC midnight). If you want NY midnight, we can adjust later.
-    const dayStart = new Date(
-      Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate(),
-        0,
-        0,
-        0
-      )
-    );
+    try {
+      await adminDb.runTransaction(async (tx) => {
+        const snap = await tx.get(capRef);
+        const used = snap.exists ? Number(snap.data()?.used ?? 0) : 0;
 
-    const dayStartTs = Timestamp.fromDate(dayStart);
-    const q = query(
-      collection(db, 'assets'),
-      where('createdAt', '>=', dayStartTs)
-    );
+        if (used + count > DAILY_CAP) {
+          throw new RateLimitError('Daily limit reached', used, DAILY_CAP);
+        }
 
-    const snapshot = await getCountFromServer(q);
-    const usedToday = snapshot.data().count;
-
-    // If generating `count` would exceed cap, block
-    if (usedToday + count > DAILY_CAP) {
-      log('create_asset.rate_limited', {
-        requestId,
-        runId,
-        rowId,
-        jobId: jobRef.id,
-        usedToday,
-        DAILY_CAP,
+        if (!snap.exists) {
+          tx.set(capRef, {
+            day: dayKey,
+            tz: 'America/Chicago',
+            used: count,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          tx.update(capRef, {
+            used: FieldValue.increment(count),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
       });
-
-      await updateDoc(jobRef, {
-        status: 'error',
-        error: 'Daily limit reached',
-        usedToday,
-        DAILY_CAP,
-        ms: Date.now() - startedAt,
-        updatedAt: serverTimestamp(),
-      });
-
-      return NextResponse.json(
-        {
-          ok: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      if (e instanceof RateLimitError) {
+        log('create_asset.rate_limited', {
           requestId,
           runId,
           rowId,
           jobId: jobRef.id,
+          usedToday: e.usedToday,
+          DAILY_CAP: e.cap,
+        });
+
+        await jobRef.update({
+          status: 'error',
           error: 'Daily limit reached',
-          usedToday,
-          DAILY_CAP,
-        },
-        { status: 429 }
-      );
+          usedToday: e.usedToday,
+          DAILY_CAP: e.cap,
+          ms: Date.now() - startedAt,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return NextResponse.json(
+          {
+            ok: false,
+            requestId,
+            runId,
+            rowId,
+            jobId: jobRef.id,
+            error: 'Daily limit reached',
+            usedToday: e.usedToday,
+            DAILY_CAP: e.cap,
+          },
+          { status: 429 },
+        );
+      }
+      throw e;
     }
 
     // Compose prompt
@@ -314,15 +338,10 @@ export async function POST(req: NextRequest) {
 
       if (!buffer) continue;
 
-      const filename = `assets/${
-        rowId ?? 'row'
-      }-${requestId}-${Date.now()}.png`;
-      const fileRef = ref(storage, filename);
+      const filename = `assets/${rowId ?? 'row'}-${requestId}-${Date.now()}.png`;
+      const url = await uploadPngAndGetUrl(filename, buffer);
 
-      await uploadBytes(fileRef, buffer, { contentType: 'image/png' });
-      const url = await getDownloadURL(fileRef);
-
-      const docRef = await addDoc(collection(db, 'assets'), {
+      const docRef = await adminDb.collection('assets').add({
         title,
         prompt: promptRaw,
         niche,
@@ -334,8 +353,9 @@ export async function POST(req: NextRequest) {
         runId,
         rowId: rowId?.toString?.() ?? rowId,
         jobId: jobRef.id,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        published: false,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       uploaded.push({ assetId: docRef.id, imageUrl: url });
@@ -351,12 +371,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (uploaded.length === 0) {
-      await updateDoc(jobRef, {
+      await jobRef.update({
         status: 'error',
         error: 'No images generated',
         generatedCount: 0,
         ms: Date.now() - startedAt,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
 
       log('create_asset.error', {
@@ -376,15 +396,15 @@ export async function POST(req: NextRequest) {
           jobId: jobRef.id,
           error: 'No images generated',
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    await updateDoc(jobRef, {
+    await jobRef.update({
       status: 'done',
       generatedCount: uploaded.length,
       ms: Date.now() - startedAt,
-      updatedAt: serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
     log('create_asset.success', {
@@ -406,20 +426,19 @@ export async function POST(req: NextRequest) {
         count: uploaded.length,
         assets: uploaded,
       },
-      { status: 200 }
+      { status: 200 },
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
     const message = String(err?.message ?? 'Internal server error');
 
-    // If we created a job doc, mark it error
     try {
       if (jobRef) {
-        await updateDoc(jobRef, {
+        await jobRef.update({
           status: 'error',
           error: message,
           ms: Date.now() - startedAt,
-          updatedAt: serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
       }
     } catch {}
@@ -441,7 +460,7 @@ export async function POST(req: NextRequest) {
         jobId: jobRef?.id ?? null,
         error: 'Internal server error',
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

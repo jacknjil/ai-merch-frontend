@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { db, storage } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { NextRequest, NextResponse } from 'next/server';
+import { db, storage } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,8 +12,8 @@ export async function POST(req: NextRequest) {
 
     if (!dataUrl || !assetId || !productId) {
       return NextResponse.json(
-        { error: "Missing dataUrl, assetId, or productId" },
-        { status: 400 }
+        { error: 'Missing dataUrl, assetId, or productId' },
+        { status: 400 },
       );
     }
 
@@ -21,13 +21,13 @@ export async function POST(req: NextRequest) {
     const matches = dataUrl.match(/^data:image\/png;base64,(.+)$/);
     if (!matches) {
       return NextResponse.json(
-        { error: "Invalid data URL format" },
-        { status: 400 }
+        { error: 'Invalid data URL format' },
+        { status: 400 },
       );
     }
 
     const base64 = matches[1];
-    const buffer = Buffer.from(base64, "base64");
+    const buffer = Buffer.from(base64, 'base64');
 
     // 1) Upload to Firebase Storage
     const filename = `mockups/${Date.now()}-${Math.random()
@@ -36,13 +36,13 @@ export async function POST(req: NextRequest) {
 
     const fileRef = ref(storage, filename);
     await uploadBytes(fileRef, buffer, {
-      contentType: "image/png",
+      contentType: 'image/png',
     });
 
     const imageUrl = await getDownloadURL(fileRef);
 
     // 2) Create Firestore doc in mockups collection
-    const colRef = collection(db, "mockups");
+    const colRef = collection(db, 'mockups');
     const docRef = await addDoc(colRef, {
       assetId,
       productId,
@@ -55,13 +55,14 @@ export async function POST(req: NextRequest) {
         id: docRef.id,
         imageUrl,
       },
-      { status: 200 }
+      { status: 200 },
     );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    console.error("Error in save-mockup API:", err);
+    console.error('Error in save-mockup API:', err);
     return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
+      { error: 'Internal server error' },
+      { status: 500 },
     );
   }
 }

@@ -1,50 +1,63 @@
+// src/lib/firebaseAdmin.ts
 import 'server-only';
-import admin from 'firebase-admin';
 
-let _app: admin.app.App | null = null;
+import {
+  getApps,
+  initializeApp,
+  cert,
+  applicationDefault,
+} from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
+import type { ServiceAccount } from 'firebase-admin/app';
+import type { Bucket } from '@google-cloud/storage';
 
-function getAdminApp() {
-  if (_app) return _app;
-  if (admin.apps.length) {
-    _app = admin.app();
-    return _app;
-  }
-
+function parseServiceAccount(): ServiceAccount {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  const bucket = process.env.FIREBASE_STORAGE_BUCKET;
+  const rawB64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
 
-  // Option A: JSON in env var (best for docker env-file)
   if (raw) {
-    const svc = JSON.parse(raw);
-    _app = admin.initializeApp({
-      credential: admin.credential.cert(svc),
-      storageBucket: bucket,
-    });
-    return _app;
+    try {
+      return JSON.parse(raw) as ServiceAccount;
+    } catch {
+      throw new Error(
+        'FIREBASE_SERVICE_ACCOUNT_JSON is set but is not valid JSON. ' +
+          'Tip: use FIREBASE_SERVICE_ACCOUNT_B64 to avoid escaping issues.',
+      );
+    }
   }
 
-  // Option B: File path (mount JSON into container)
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    _app = admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      storageBucket: bucket,
-    });
-    return _app;
+  if (rawB64) {
+    try {
+      const decoded = Buffer.from(rawB64, 'base64').toString('utf8');
+      return JSON.parse(decoded) as ServiceAccount;
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_B64 is set but is invalid.');
+    }
   }
 
-  // IMPORTANT: this throw is OK because it's inside getAdminApp()
-  // and won't execute during build unless you call adminDb/adminBucket.
   throw new Error(
-    'Missing FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS'
+    'Missing FIREBASE_SERVICE_ACCOUNT_JSON (preferred) or FIREBASE_SERVICE_ACCOUNT_B64 or GOOGLE_APPLICATION_CREDENTIALS',
   );
 }
 
-export function adminDb() {
-  return getAdminApp().firestore();
-}
+const adminApp =
+  getApps().length > 0
+    ? getApps()[0]
+    : initializeApp(
+        process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+          process.env.FIREBASE_SERVICE_ACCOUNT_B64
+          ? {
+              credential: cert(parseServiceAccount()),
+              storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+            }
+          : {
+              credential: applicationDefault(),
+              storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+            },
+      );
 
-export function adminBucket() {
-  return getAdminApp().storage().bucket();
-}
-
-export const FieldValue = admin.firestore.FieldValue;
+// ✅ IMPORTANT: export VALUES, not functions
+export const adminDb = getFirestore(adminApp);
+export const adminBucket: Bucket = getStorage(adminApp).bucket();
+export { FieldValue };
