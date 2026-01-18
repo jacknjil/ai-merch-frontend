@@ -71,7 +71,7 @@ function getTimeZoneOffsetMs(timeZone: string, date: Date) {
     Number(get('day')),
     Number(get('hour')),
     Number(get('minute')),
-    Number(get('second'))
+    Number(get('second')),
   );
 
   return asUTC - date.getTime();
@@ -86,7 +86,7 @@ function zonedTimeToUtcDate(
   d: number,
   hh = 0,
   mm = 0,
-  ss = 0
+  ss = 0,
 ) {
   const utcGuess = Date.UTC(y, m - 1, d, hh, mm, ss);
   let t = utcGuess;
@@ -104,7 +104,7 @@ async function getUsedTodayCount(timeZone: string) {
   const dayStart = zonedTimeToUtcDate(timeZone, year, month, day, 0, 0, 0);
 
   // Use Firestore aggregation count() when available
-  const db = adminDb();
+  const db = adminDb;
   const q = db.collection('assets').where('createdAt', '>=', dayStart);
 
   try {
@@ -122,7 +122,7 @@ async function getUsedTodayCount(timeZone: string) {
 function makeFirebaseDownloadUrl(
   bucketName: string,
   storagePath: string,
-  token: string
+  token: string,
 ) {
   // Note: bucketName may be like "ai-merch-dev.firebasestorage.app"
   const encPath = encodeURIComponent(storagePath);
@@ -130,7 +130,7 @@ function makeFirebaseDownloadUrl(
 }
 
 async function uploadPngAndGetUrl(storagePath: string, png: Buffer) {
-  const bucket = adminBucket();
+  const bucket = adminBucket;
   const file = bucket.file(storagePath);
   const token = randomUUID();
 
@@ -151,7 +151,7 @@ async function uploadPngAndGetUrl(storagePath: string, png: Buffer) {
 // ---------- route ----------
 
 export async function POST(req: NextRequest) {
-  const db = adminDb();
+  const db = adminDb;
   // 0) Auth (n8n shared secret)
   const secret = req.headers.get('x-n8n-secret');
   if (
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
   ) {
     return NextResponse.json(
       { ok: false, error: 'Unauthorized' },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(
         { ok: false, requestId, runId, rowId, error: 'Missing prompt' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -294,7 +294,7 @@ export async function POST(req: NextRequest) {
           count: createdAssets.length,
           assets: createdAssets,
         },
-        { status: 200 }
+        { status: 200 },
       );
     }
 
@@ -335,7 +335,7 @@ export async function POST(req: NextRequest) {
           usedToday,
           DAILY_CAP,
         },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
@@ -450,7 +450,7 @@ export async function POST(req: NextRequest) {
           jobId: jobRef.id,
           error: 'No images generated',
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -482,7 +482,7 @@ export async function POST(req: NextRequest) {
         count: createdAssets.length,
         assets: createdAssets,
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (err: any) {
     const msg = String(err?.message ?? 'Internal server error');
@@ -515,7 +515,7 @@ export async function POST(req: NextRequest) {
         jobId: jobRef?.id ?? null,
         error: 'Internal server error',
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
