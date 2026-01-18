@@ -9,11 +9,13 @@ const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeSecretKey)
   throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
 
-const stripe = new Stripe(stripeSecretKey);
+const stripe = new Stripe(stripeSecretKey, {
+  apiVersion: '2025-11-17.clover', // pick whatever you use elsewhere; keep consistent
+});
 
 // Helpful when behind Nginx / reverse proxy
 function getOrigin(req: NextRequest) {
-  const proto = req.headers.get('x-forwarded-proto') || 'http';
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
   const host =
     req.headers.get('x-forwarded-host') ||
     req.headers.get('host') ||
@@ -26,7 +28,7 @@ export async function POST(req: NextRequest) {
   const createdAtMs = Date.now();
 
   // Create ref once so catch() can update it too
-  const checkoutRef = adminDb().collection('checkout_sessions').doc(checkoutId);
+  const checkoutRef = adminDb.collection('checkout_sessions').doc(checkoutId);
 
   try {
     const body = await req.json();
@@ -58,7 +60,7 @@ export async function POST(req: NextRequest) {
     const itemCount = normalizedItems.reduce((sum, i) => sum + i.quantity, 0);
     const subtotalCents = normalizedItems.reduce(
       (sum, i) => sum + i.quantity * UNIT_AMOUNT_CENTS,
-      0
+      0,
     );
 
     // ✅ STEP A-1: create Firestore checkout_sessions doc BEFORE Stripe redirect
@@ -141,7 +143,10 @@ export async function POST(req: NextRequest) {
       status: 'stripe_created',
       updatedAt: FieldValue.serverTimestamp(),
       'stripe.sessionId': session.id,
-      'stripe.paymentIntentId': session.payment_intent ?? null,
+      'stripe.paymentIntentId':
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : null,
     });
 
     return NextResponse.json({ url: session.url, checkoutId });
@@ -157,13 +162,13 @@ export async function POST(req: NextRequest) {
           updatedAt: FieldValue.serverTimestamp(),
           error: err?.message ?? 'Internal server error',
         },
-        { merge: true }
+        { merge: true },
       );
     } catch {}
 
     return NextResponse.json(
       { error: err?.message ?? 'Internal server error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

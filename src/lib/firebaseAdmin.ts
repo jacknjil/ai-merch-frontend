@@ -21,8 +21,7 @@ function parseServiceAccount(): ServiceAccount {
       return JSON.parse(raw) as ServiceAccount;
     } catch {
       throw new Error(
-        'FIREBASE_SERVICE_ACCOUNT_JSON is set but is not valid JSON. ' +
-          'Tip: use FIREBASE_SERVICE_ACCOUNT_B64 to avoid escaping issues.',
+        'FIREBASE_SERVICE_ACCOUNT_JSON is set but is not valid JSON. Tip: use FIREBASE_SERVICE_ACCOUNT_B64 to avoid escaping issues.',
       );
     }
   }
@@ -37,7 +36,14 @@ function parseServiceAccount(): ServiceAccount {
   }
 
   throw new Error(
-    'Missing FIREBASE_SERVICE_ACCOUNT_JSON (preferred) or FIREBASE_SERVICE_ACCOUNT_B64 or GOOGLE_APPLICATION_CREDENTIALS',
+    'Missing FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_SERVICE_ACCOUNT_B64',
+  );
+}
+
+const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+if (!bucketName) {
+  throw new Error(
+    'Missing FIREBASE_STORAGE_BUCKET (e.g. your-project-id.firebasestorage.app)',
   );
 }
 
@@ -49,15 +55,12 @@ const adminApp =
           process.env.FIREBASE_SERVICE_ACCOUNT_B64
           ? {
               credential: cert(parseServiceAccount()),
-              storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+              storageBucket: bucketName,
             }
-          : {
-              credential: applicationDefault(),
-              storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-            },
+          : { credential: applicationDefault(), storageBucket: bucketName },
       );
 
-// ✅ IMPORTANT: export VALUES, not functions
+// ✅ export VALUES (not functions)
 export const adminDb = getFirestore(adminApp);
-export const adminBucket: Bucket = getStorage(adminApp).bucket();
+export const adminBucket: Bucket = getStorage(adminApp).bucket(bucketName);
 export { FieldValue };
