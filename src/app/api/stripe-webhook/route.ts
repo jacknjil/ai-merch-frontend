@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/api/stripe-webhook/route.ts
 import Stripe from 'stripe';
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,6 +17,10 @@ const webhookSecret = mustEnv('STRIPE_WEBHOOK_SECRET');
 
 const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-11-17.clover' });
 
+function log(event: string, data: Record<string, unknown> = {}) {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...data }));
+}
+
 export async function POST(req: NextRequest) {
   const sig = req.headers.get('stripe-signature');
   if (!sig) {
@@ -25,55 +30,70 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  log('stripe_webhook.hit', {
+    hasSig: true,
+    contentType: req.headers.get('content-type'),
+  });
+
   let stripeEvent: Stripe.Event;
+  let rawBody = '';
 
   try {
-    // IMPORTANT: raw body for signature verification
-    const rawBody = await req.text();
+    rawBody = await req.text(); // raw body is required
     stripeEvent = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    console.error(
-      'stripe-webhook: signature verification failed:',
-      err?.message ?? err,
-    );
+    log('stripe_webhook.signature_failed', {
+      message: String(err?.message ?? err),
+    });
     return NextResponse.json(
       { ok: false, error: 'Webhook signature verification failed' },
       { status: 400 },
     );
   }
 
+  log('stripe_webhook.verified', {
+    id: stripeEvent.id,
+    type: stripeEvent.type,
+    created: stripeEvent.created,
+  });
+
   try {
-    // Idempotent write: event.id is unique
-    const eventRef = adminDb.collection('stripe_events').doc(stripeEvent.id);
+    // OPTIONAL: store a smaller payload to avoid Firestore 1MB doc limit surprises
+    const obj: any = stripeEvent.data?.object ?? null;
+    const checkoutId = obj?.metadata?.checkoutId ?? null;
 
-    await eventRef.set(
-      {
-        id: stripeEvent.id,
-        type: stripeEvent.type,
-        created: stripeEvent.created,
-        livemode: stripeEvent.livemode,
-        api_version: stripeEvent.api_version ?? null,
-        // Store the event payload (can be large but usually OK). If you hit limits, we’ll slim it.
-        data: stripeEvent.data,
-        request: stripeEvent.request ?? null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        pending_webhooks: (event as any).pending_webhooks ?? null,
-        receivedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    await adminDb
+      .collection('stripe_events')
+      .doc(stripeEvent.id)
+      .set(
+        {
+          id: stripeEvent.id,
+          type: stripeEvent.type,
+          created: stripeEvent.created,
+          livemode: stripeEvent.livemode,
+          api_version: stripeEvent.api_version ?? null,
 
-    // Optional: on checkout.session.completed, you can create/update an order doc here later
-    // without breaking signature handling.
+          // “Slim but useful” payload:
+          object: obj,
+          checkoutId,
+
+          receivedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+    log('stripe_webhook.persisted', {
+      id: stripeEvent.id,
+      type: stripeEvent.type,
+      checkoutId,
+    });
 
     return NextResponse.json({ ok: true }, { status: 200 });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    console.error(
-      'stripe-webhook: failed to persist event:',
-      err?.message ?? err,
-    );
+    // IMPORTANT: fail the webhook so Stripe shows the error and retries
+    log('stripe_webhook.persist_failed', {
+      message: String(err?.message ?? err),
+    });
     return NextResponse.json(
       { ok: false, error: 'Failed to persist event' },
       { status: 500 },
